@@ -1,12 +1,16 @@
 #!/bin/bash
 
-# This script is intended to be run as root.
-# This script is intended to be run on a fresh install of Ubuntu 22.04 LTS.
-# This script is intended to be run on a server, not a desktop.
+# This script is intended to be run as root on a fresh install of Ubuntu 22.04 LTS server.
 
-sshd_file="/etc/ssh/sshd_config"
-username=""
-sshport=""
+set -euo pipefail
+
+SSHD_FILE="/etc/ssh/sshd_config"
+LOG_FILE="/var/log/server_setup.log"
+USERNAME=""
+SSHPORT=""
+
+exec > >(tee -i $LOG_FILE)
+exec 2>&1
 
 function run_as_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -21,11 +25,7 @@ function check_distro() {
         exit 1
     fi
     source /etc/os-release
-    if [[ $ID != "ubuntu" ]]; then
-        echo "This script is intended to be run on Ubuntu 22.04 LTS"
-        exit 1
-    fi
-    if [[ $VERSION_ID != "22.04" ]]; then
+    if [[ $ID != "ubuntu" || $VERSION_ID != "22.04" ]]; then
         echo "This script is intended to be run on Ubuntu 22.04 LTS"
         exit 1
     fi
@@ -33,16 +33,19 @@ function check_distro() {
 
 function create_swap() {
     if free | awk '/^Swap:/ {exit !$2}'; then
-        sleep 2
         echo "Swap already exists"
     else
         PHYSRAM=$(grep MemTotal /proc/meminfo | awk '{print int($2 / 1024 / 1024 + 0.5)}')
-        let "SWAPSIZE=2*$PHYSRAM"
-        (($SWAPSIZE >= 1 && $SWAPSIZE >= 31)) && SWAPSIZE=31
-        (($SWAPSIZE <= 2)) && SWAPSIZE=2
+        SWAPSIZE=$((2 * PHYSRAM))
+        SWAPSIZE=$((SWAPSIZE > 31 ? 31 : SWAPSIZE))
+        SWAPSIZE=$((SWAPSIZE < 2 ? 2 : SWAPSIZE))
 
-        fallocate -l ${SWAPSIZE}G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && cp /etc/fstab /etc/fstab.bak && echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
-        sleep 2
+        fallocate -l ${SWAPSIZE}G /swapfile
+        chmod 600 /swapfile
+        mkswap /swapfile
+        swapon /swapfile
+        cp /etc/fstab /etc/fstab.bak
+        echo '/swapfile none swap sw 0 0' | tee -a /etc/fstab
         echo "Swap created"
     fi
 }
@@ -53,39 +56,53 @@ function update_upgrade() {
 }
 
 function add_user() {
-    read -r -p "Enter username: " username
-    adduser $username
-    usermod -aG sudo $username
+    while true; do
+        read -r -p "Enter username: " USERNAME
+        if [[ "$USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+            adduser $USERNAME
+            usermod -aG sudo $USERNAME
+            break
+        else
+            echo "Invalid username. Please try again."
+        fi
+    done
 }
 
 function setup_ssh() {
     if [[ -f /root/.ssh/authorized_keys ]]; then
-        mkdir -p /home/$username/.ssh
-        cp /root/.ssh/authorized_keys /home/$username/.ssh/authorized_keys
-        chown -R $username:$username /home/$username/.ssh
-        chmod 700 /home/$username/.ssh
-        chmod 600 /home/$username/.ssh/authorized_keys
+        mkdir -p /home/$USERNAME/.ssh
+        cp /root/.ssh/authorized_keys /home/$USERNAME/.ssh/authorized_keys
+        chown -R $USERNAME:$USERNAME /home/$USERNAME/.ssh
+        chmod 700 /home/$USERNAME/.ssh
+        chmod 600 /home/$USERNAME/.ssh/authorized_keys
     fi
 
-    read -r -p "Enter ssh port between 1024 and 65535: " sshport
+    while true; do
+        read -r -p "Enter ssh port between 1024 and 65535: " SSHPORT
+        if [[ "$SSHPORT" =~ ^[0-9]+$ ]] && [ "$SSHPORT" -ge 1024 ] && [ "$SSHPORT" -le 65535 ]; then
+            break
+        else
+            echo "Invalid port number. Please try again."
+        fi
+    done
 
-    sed -i "s/#Port 22/Port $sshport/g" $sshd_file
-    sed -i "s/PermitRootLogin yes/PermitRootLogin no/g" $sshd_file
-    sed -i "s/#PasswordAuthentication yes/PasswordAuthentication no/g" $sshd_file
-    sed -i "s/#PubkeyAuthentication yes/PubkeyAuthentication yes/g" $sshd_file
-    sed -i "s/X11Forwarding yes/X11Forwarding no/g" $sshd_file
-    sed -i "s/#AllowTcpForwarding yes/AllowTcpForwarding no/g" $sshd_file
-    sed -i "s/#LogLevel INFO/LogLevel VERBOSE/g" $sshd_file
-    sed -i "s/#MaxAuthTries 6/MaxAuthTries 3/g" $sshd_file
-    sed -i "s/#MaxSessions 10/MaxSessions 3/g" $sshd_file
-    echo "AllowUsers $username" >> $sshd_file
+    sed -i "s/#Port 22/Port $SSHPORT/g" $SSHD_FILE
+    sed -i "s/PermitRootLogin yes/PermitRootLogin no/g" $SSHD_FILE
+    sed -i "s/#PasswordAuthentication yes/PasswordAuthentication no/g" $SSHD_FILE
+    sed -i "s/#PubkeyAuthentication yes/PubkeyAuthentication yes/g" $SSHD_FILE
+    sed -i "s/X11Forwarding yes/X11Forwarding no/g" $SSHD_FILE
+    sed -i "s/#AllowTcpForwarding yes/AllowTcpForwarding no/g" $SSHD_FILE
+    sed -i "s/#LogLevel INFO/LogLevel VERBOSE/g" $SSHD_FILE
+    sed -i "s/#MaxAuthTries 6/MaxAuthTries 3/g" $SSHD_FILE
+    sed -i "s/#MaxSessions 10/MaxSessions 3/g" $SSHD_FILE
+    echo "AllowUsers $USERNAME" >> $SSHD_FILE
 }
 
 function setup_firewall() {
     apt install ufw -y
     ufw default deny incoming
     ufw default allow outgoing
-    ufw allow $sshport
+    ufw allow $SSHPORT/tcp
     ufw enable
 }
 
@@ -97,7 +114,7 @@ function harden_server() {
     cat <<EOF > /etc/fail2ban/jail.local
 [sshd]
 enabled = true
-port = $sshport
+port = $SSHPORT
 logpath = /var/log/auth.log
 maxretry = 3
 EOF
@@ -120,11 +137,11 @@ function install_ddos_protection() {
     apt install dnsutils -y
     apt install iptables-persistent -y
 
-    iptables -A INPUT -p tcp --dport $sshport -m connlimit --connlimit-above 3 -j REJECT --reject-with tcp-reset
+    iptables -A INPUT -p tcp --dport $SSHPORT -m connlimit --connlimit-above 3 -j REJECT --reject-with tcp-reset
     iptables -A INPUT -p tcp --syn -m limit --limit 1/s -j ACCEPT
-    iptables -A INPUT -p tcp --dport $sshport -m limit --limit 1/s -j ACCEPT
-    iptables -A INPUT -p tcp --dport $sshport -m state --state NEW -m recent --set
-    iptables -A INPUT -p tcp --dport $sshport -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
+    iptables -A INPUT -p tcp --dport $SSHPORT -m limit --limit 1/s -j ACCEPT
+    iptables -A INPUT -p tcp --dport $SSHPORT -m state --state NEW -m recent --set
+    iptables -A INPUT -p tcp --dport $SSHPORT -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
 
     netfilter-persistent save
     netfilter-persistent start
@@ -149,7 +166,7 @@ function restart_ssh() {
         case $input in
             [Yy]* ) systemctl restart ssh; break;;
             [Nn]* ) exit;;
-            * ) echo "Invalid input...";;
+            * ) echo "Invalid input. Please enter Y or n.";;
         esac
     done
 }
