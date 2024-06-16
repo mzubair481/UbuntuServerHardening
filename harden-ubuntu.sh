@@ -5,6 +5,7 @@
 # This script is intended to be run on a server, not a desktop.
 
 sshd_file="/etc/ssh/sshd_config"
+username=""
 
 function run_as_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -58,7 +59,7 @@ function add_user() {
 
 function setup_ssh() {
     if [[ -f /root/.ssh/authorized_keys ]]; then
-        mkdir /home/$username/.ssh
+        mkdir -p /home/$username/.ssh
         cp /root/.ssh/authorized_keys /home/$username/.ssh/authorized_keys
         chown -R $username:$username /home/$username/.ssh
         chmod 700 /home/$username/.ssh
@@ -76,6 +77,7 @@ function setup_ssh() {
     sed -i "s/#LogLevel INFO/LogLevel VERBOSE/g" $sshd_file
     sed -i "s/#MaxAuthTries 6/MaxAuthTries 3/g" $sshd_file
     sed -i "s/#MaxSessions 10/MaxSessions 3/g" $sshd_file
+    echo "AllowUsers $username" >> $sshd_file
 }
 
 function setup_firewall() {
@@ -87,22 +89,51 @@ function setup_firewall() {
 }
 
 function harden_server() {
-    if grep -q "tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0" /etc/fstab; then
-        echo "tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0" >> /etc/fstab
-    fi
-
-    apt install unattended-upgrades -y
+    echo "tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0" >> /etc/fstab
+    apt install unattended-upgrades fail2ban -y
     dpkg-reconfigure --priority=low unattended-upgrades
+
+    cat <<EOF > /etc/fail2ban/jail.local
+[sshd]
+enabled = true
+port = $sshport
+logpath = /var/log/auth.log
+maxretry = 3
+EOF
+
+    systemctl enable fail2ban
+    systemctl start fail2ban
+}
+
+function install_intrusion_detection() {
+    apt install psad -y
+    systemctl enable psad
+    systemctl start psad
+    psad --sig-update
+}
+
+function install_ddos_protection() {
+    apt install dnsutils -y
+    apt install iptables-persistent -y
+
+    iptables -A INPUT -p tcp --dport $sshport -m connlimit --connlimit-above 3 -j REJECT --reject-with tcp-reset
+    iptables -A INPUT -p tcp --syn -m limit --limit 1/s -j ACCEPT
+    iptables -A INPUT -p tcp --dport $sshport -m limit --limit 1/s -j ACCEPT
+    iptables -A INPUT -p tcp --dport $sshport -m state --state NEW -m recent --set
+    iptables -A INPUT -p tcp --dport $sshport -m state --state NEW -m recent --update --seconds 60 --hitcount 4 -j DROP
+
+    netfilter-persistent save
+    netfilter-persistent start
 }
 
 function restart_ssh() {
     while true; do
-    read -r -p "Do you wish to restart ssh? [Y/n] " input
-    case $input in
-        [Yy]* ) systemctl restart ssh; break;;
-        [Nn]* ) exit;;
-        * ) echo "Invalid input...";;
-    esac
+        read -r -p "Do you wish to restart ssh? [Y/n] " input
+        case $input in
+            [Yy]* ) systemctl restart ssh; break;;
+            [Nn]* ) exit;;
+            * ) echo "Invalid input...";;
+        esac
     done
 }
 
@@ -114,4 +145,6 @@ add_user
 setup_ssh
 setup_firewall
 harden_server
+install_intrusion_detection
+install_ddos_protection
 restart_ssh
