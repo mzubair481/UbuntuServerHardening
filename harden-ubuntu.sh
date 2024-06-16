@@ -6,6 +6,7 @@
 
 sshd_file="/etc/ssh/sshd_config"
 username=""
+sshport=""
 
 function run_as_root() {
     if [[ $EUID -ne 0 ]]; then
@@ -90,7 +91,7 @@ function setup_firewall() {
 
 function harden_server() {
     echo "tmpfs /run/shm tmpfs defaults,noexec,nosuid 0 0" >> /etc/fstab
-    apt install unattended-upgrades fail2ban -y
+    apt install unattended-upgrades fail2ban auditd logwatch -y
     dpkg-reconfigure --priority=low unattended-upgrades
 
     cat <<EOF > /etc/fail2ban/jail.local
@@ -103,6 +104,9 @@ EOF
 
     systemctl enable fail2ban
     systemctl start fail2ban
+    systemctl enable auditd
+    systemctl start auditd
+    echo "logwatch --output mail" >> /etc/cron.daily/00logwatch
 }
 
 function install_intrusion_detection() {
@@ -126,6 +130,19 @@ function install_ddos_protection() {
     netfilter-persistent start
 }
 
+function disable_unused_services() {
+    systemctl disable avahi-daemon
+    systemctl disable cups
+    systemctl disable bluetooth
+}
+
+function setup_aide() {
+    apt install aide -y
+    aideinit
+    mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    echo "0 3 * * * root /usr/bin/aide --check" >> /etc/crontab
+}
+
 function restart_ssh() {
     while true; do
         read -r -p "Do you wish to restart ssh? [Y/n] " input
@@ -147,4 +164,6 @@ setup_firewall
 harden_server
 install_intrusion_detection
 install_ddos_protection
+disable_unused_services
+setup_aide
 restart_ssh
