@@ -96,6 +96,9 @@ function setup_ssh() {
     sed -i "s/#MaxAuthTries 6/MaxAuthTries 3/g" $SSHD_FILE
     sed -i "s/#MaxSessions 10/MaxSessions 3/g" $SSHD_FILE
     echo "AllowUsers $USERNAME" >> $SSHD_FILE
+
+    # Disable root login via SSH
+    sed -i "s/^PermitRootLogin.*/PermitRootLogin no/g" $SSHD_FILE
 }
 
 function setup_firewall() {
@@ -160,6 +163,11 @@ function setup_aide() {
     echo "0 3 * * * root /usr/bin/aide --check" >> /etc/crontab
 }
 
+function disable_root_account() {
+    passwd -l root
+    echo "Root account has been disabled."
+}
+
 function restart_ssh() {
     while true; do
         read -r -p "Do you wish to restart ssh? [Y/n] " input
@@ -183,4 +191,5 @@ install_intrusion_detection
 install_ddos_protection
 disable_unused_services
 setup_aide
+disable_root_account
 restart_ssh
