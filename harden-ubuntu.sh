@@ -101,6 +101,7 @@ function setup_ssh() {
     sed -i "s/#LogLevel INFO/LogLevel VERBOSE/g" "$SSHD_FILE"
     sed -i "s/#MaxAuthTries 6/MaxAuthTries 3/g" "$SSHD_FILE"
     sed -i "s/#MaxSessions 10/MaxSessions 3/g" "$SSHD_FILE"
+    sed -i "s/PasswordAuthentication yes/PasswordAuthentication no/g" "$SSHD_FILE"
     echo "AllowUsers $USERNAME" >> "$SSHD_FILE"
 
     # Disable root login via SSH
