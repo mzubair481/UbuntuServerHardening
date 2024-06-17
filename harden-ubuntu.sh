@@ -112,7 +112,7 @@ function setup_firewall() {
     ufw default deny incoming
     ufw default allow outgoing
     ufw allow "$SSHPORT"/tcp
-    ufw enable
+    ufw --force enable
 }
 
 function harden_server() {
