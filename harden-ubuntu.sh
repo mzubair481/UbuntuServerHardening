@@ -137,15 +137,18 @@ EOF
 }
 
 function install_intrusion_detection() {
-    apt install psad -y
+    apt install psad aide -y
     systemctl enable psad
     systemctl start psad
     psad --sig-update
+
+    aideinit
+    mv /var/lib/aide/aide.db.new /var/lib/aide/aide.db
+    echo "0 3 * * * root /usr/bin/aide --check" >> /etc/crontab
 }
 
 function install_ddos_protection() {
-    apt install dnsutils -y
-    apt install iptables-persistent -y
+    apt install dnsutils iptables-persistent -y
 
     iptables -A INPUT -p tcp --dport "$SSHPORT" -m connlimit --connlimit-above 3 -j REJECT --reject-with tcp-reset
     iptables -A INPUT -p tcp --syn -m limit --limit 1/s -j ACCEPT
