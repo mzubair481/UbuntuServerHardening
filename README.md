@@ -30,11 +30,11 @@ The project aims to automate the process of hardening and securing a fresh insta
    ```
 2. **Make the script executable:**
    ```bash
-    chmod +x harden-ubuntu.sh
+    chmod +x main.sh
     ```
 3. **Run the script:**
     ```bash
-    sudo ./harden-ubuntu.sh
+    sudo ./main.sh
     ```
 4. **Follow the on-screen instructions to configure the script.**
 
@@ -75,7 +75,7 @@ Sets up AIDE for file integrity monitoring:
 
 ## Customization
 
-You can customize various aspects of the script by modifying the respective functions within the `harden-ubuntu.sh` file. For example, you can change the default SSH port, add additional firewall rules, or configure different fail2ban settings.
+You can customize various aspects of the script by modifying the respective functions within the `main.sh` file. For example, you can change the default SSH port, add additional firewall rules, or configure different fail2ban settings.
 
 ## Contributing
 
